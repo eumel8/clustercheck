@@ -181,7 +181,7 @@ func TestQueryPrometheus(t *testing.T) {
                 t.Run(tt.name, func(t *testing.T) {
                         // Create test server
                         server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-                                // Note: Due to bug in main.go line 64-66, basic auth is only set when username is empty
+                                // Note: Due to feature in main.go line 64-66, basic auth is only set when username is empty
                                 // So we check for auth when username is empty (which matches the buggy behavior)
                                 if tt.username == "" && tt.password != "" {
                                         user, pass, ok := r.BasicAuth()
