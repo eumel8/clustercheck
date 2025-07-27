@@ -1,5 +1,5 @@
 # clustercheck
-![Coverage](https://img.shields.io/badge/Coverage-53.8%25-yellow)
+![Coverage](https://img.shields.io/badge/Coverage-33.8%25-yellow)
 
 ## intro
 
@@ -60,3 +60,36 @@ export PROMETHEUS_URL="https://my-prometheus.instance"
 export PROM_USER="user"
 export PROM_PASS="pass"
 ```
+
+## Bitwarden feature
+
+Start the programm with `-bw` or set env var
+
+```
+export CLUSTERCHECK_BW=1
+```
+
+In this version the programm expect an item on a Bitwarden service containing username/password for HTTP Basic Auth on
+Prometheus API
+
+```
+bw get item "Prometheus Agent RemoteWrite
+```
+
+
+### set FQDN
+
+If your cluster has a FQDN which is specific to set start the programm with `-f` together with the FQDN or set env var
+
+```
+CLUSTERCHECK_FQDN=example.com
+```
+
+### Prometheus TLS connection
+
+we skip SSL verification and allow insecure connection by default, take care.
+
+### Proxy Settings
+
+we respect env vars like `http_proxy` or `https_proxy` for Prometheus endpoint connection from your computer.
+
