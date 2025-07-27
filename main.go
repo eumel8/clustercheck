@@ -5,19 +5,51 @@ package main
 // It uses the Bitwarden CLI to retrieve Prometheus credentials and performs checks on various components.
 
 import (
+	"bytes"
 	"crypto/tls"
 	"encoding/json"
 	"fmt"
+	"flag"
 	"io/ioutil"
 	"net/http"
 	"net/url"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
 
 	"k8s.io/client-go/tools/clientcmd"
 )
+
+// Struct to hold Bitwarden login fields
+type BitwardenItem struct {
+        Login struct {
+                Username string `json:"username"`
+                Password string `json:"password"`
+        } `json:"login"`
+}
+
+// Get BW_SESSION from env
+func getSessionToken() string {
+        return os.Getenv("BW_SESSION")
+}
+
+// Run Bitwarden CLI to get the item JSON
+func getBitwardenItemJSON(itemName string) ([]byte, error) {
+        cmd := exec.Command("bw", "get", "item", itemName)
+        cmd.Env = append(os.Environ(), "BW_SESSION="+getSessionToken())
+
+        var out bytes.Buffer
+        cmd.Stdout = &out
+
+        err := cmd.Run()
+        if err != nil {
+                return nil, err
+        }
+
+        return out.Bytes(), nil
+}
 
 // Prometheus response struct
 type PrometheusResponse struct {
@@ -54,16 +86,13 @@ func queryPrometheus(prometheus string, query string, username string, password 
 	value := "0"
 	params := url.Values{}
 	params.Add("query", query)
-	url := fmt.Sprintf("%s?%s", prometheus, params.Encode())
+	url := fmt.Sprintf("%s/api/v1/query?%s", prometheus, params.Encode())
 
 	req, err := http.NewRequest("GET", url, nil)
 	if err != nil {
 		return value, err
 	}
-	// Set headers for basic auth
-	if username == "" {
-		req.SetBasicAuth(username, password)
-	}
+	req.SetBasicAuth(username, password)
 
 	// skip TLS verification
 	insecureClient := &http.Client{
@@ -113,22 +142,56 @@ func queryPrometheus(prometheus string, query string, username string, password 
 }
 
 func main() {
+	bitwarden := flag.Bool("bw", false, "enable Bitwarden password store")
+	fqdn := flag.String("f", "", "optional FQDN of cluster targets, e.g. example.com")
+	flag.Parse()
+
 
 	// static Prometheus API endpoint
-	prometheus := "https://127.0.0.1:9090/api/v1/query"
+	prometheus := "https://127.0.0.1:9090"
 	username := os.Getenv("PROM_USER")
 	password := os.Getenv("PROM_PASS")
+	clcBW := os.Getenv("CLUSTERCHECK_BW")
+	clcFQDN := os.Getenv("CLUSTERCHECK_FQDN")
+
+	if *bitwarden == true || clcBW != "" {
+		// doing bitwarden stuff here to get prometheus credentials
+		itemName := "Prometheus Agent RemoteWrite"
+		jsonData, err := getBitwardenItemJSON(itemName)
+		if err != nil {
+			fmt.Printf("Failed to get item from Bitwarden: %v\n", err)
+		}
+
+		var item BitwardenItem
+		err = json.Unmarshal(jsonData, &item)
+		if err != nil {
+			fmt.Printf("Failed to parse Bitwarden JSON: %v\n", err)
+		}
+
+		username = item.Login.Username
+		password = item.Login.Password
+	}
 
 	cluster, err := getCurrentContext()
 	if err != nil {
 		fmt.Printf("Failed to get current kube context: %v\n", err)
 	}
+
+	if *fqdn != "" {
+		cluster =  cluster + "." + *fqdn
+	}
+
+	if clcFQDN != "" {
+		cluster =  cluster + "." + clcFQDN
+	}
+
 	if os.Getenv("PROMETHEUS_URL") != "" {
 		prometheus = os.Getenv("PROMETHEUS_URL")
 	}
 	if os.Getenv("CLUSTER") != "" {
 		cluster = os.Getenv("CLUSTER")
 	}
+
 	queries := []PrometheusQueries{
 		{
 			Description: "APISERVER",
