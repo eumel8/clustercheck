@@ -27,5 +27,6 @@ jobs:
         binary_name: clustercheck
         retry: 10
         sha256sum: true
+        md5sum: false
         overwrite: true
         pre_command: go mod tidy
