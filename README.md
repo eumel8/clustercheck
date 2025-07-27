@@ -84,3 +84,12 @@ If your cluster has a FQDN which is specific to set start the programm with `-f`
 ```
 CLUSTERCHECK_FQDN=example.com
 ```
+
+### Prometheus TLS connection
+
+we skip SSL verification and allow insecure connection by default, take care.
+
+### Proxy Settings
+
+we respect env vars like `http_proxy` or `https_proxy` for Prometheus endpoint connection from your computer.
+
