@@ -177,17 +177,20 @@ func main() {
 		fmt.Printf("Failed to get current kube context: %v\n", err)
 	}
 
+	shortCluster := cluster
+
 	if *fqdn != "" {
-		cluster =  cluster + "." + *fqdn
+		cluster = cluster + "." + *fqdn
 	}
 
 	if clcFQDN != "" {
-		cluster =  cluster + "." + clcFQDN
+		cluster = cluster + "." + clcFQDN
 	}
 
 	if os.Getenv("PROMETHEUS_URL") != "" {
 		prometheus = os.Getenv("PROMETHEUS_URL")
 	}
+
 	if os.Getenv("CLUSTER") != "" {
 		cluster = os.Getenv("CLUSTER")
 	}
@@ -199,7 +202,7 @@ func main() {
 		},
 		{
 			Description: "CLUSTER",
-			Query:       `capi_cluster_status_phase{phase="Provisioned", tenantcluster="` + cluster + `"} == 1`,
+			Query:       `capi_cluster_status_phase{phase="Provisioned", tenantcluster="` + shortCluster + `"} == 1`,
 		},
 		{
 			Description: "FLUENTBITERRORS",
