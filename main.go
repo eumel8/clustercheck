@@ -198,7 +198,7 @@ func main() {
 	queries := []PrometheusQueries{
 		{
 			Description: "APISERVER",
-			Query:       `avg(up{application="apiserver",cluster="` + cluster + `"})`,
+			Query:       `avg(up{job="kube-apiserver",cluster="` + cluster + `"})`,
 		},
 		{
 			Description: "CLUSTER",
