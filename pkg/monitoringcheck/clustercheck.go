@@ -6,6 +6,7 @@ package monitoringcheck
 
 import (
 	"bytes"
+	"context"
 	"crypto/tls"
 	"encoding/json"
 	"fmt"
@@ -18,7 +19,14 @@ import (
 	"strings"
 	"time"
 
+	helmv2 "github.com/fluxcd/helm-controller/api/v2"
+	kustomizev1 "github.com/fluxcd/kustomize-controller/api/v1"
+	"k8s.io/apimachinery/pkg/runtime"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/tools/clientcmd"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
 // Struct to hold Bitwarden login fields
@@ -138,6 +146,203 @@ func QueryPrometheus(prometheus string, query string, username string, password 
 	}
 
 	return value, nil
+}
+
+// getKubeConfig returns the path to the kubeconfig file
+func getKubeConfig() string {
+	// Check if KUBECONFIG env var is set
+	if kubeconfig := os.Getenv("KUBECONFIG"); kubeconfig != "" {
+		return kubeconfig
+	}
+	// Default to $HOME/.kube/config
+	return filepath.Join(os.Getenv("HOME"), ".kube", "config")
+}
+
+// CheckPods checks if all pods in the cluster are in Running or Succeeded state
+func CheckPods(namespace string) error {
+	kubeconfigPath := getKubeConfig()
+
+	// Build config from kubeconfig file
+	config, err := clientcmd.BuildConfigFromFlags("", kubeconfigPath)
+	if err != nil {
+		return fmt.Errorf("failed to build config: %v", err)
+	}
+
+	// Create clientset
+	clientset, err := kubernetes.NewForConfig(config)
+	if err != nil {
+		return fmt.Errorf("failed to create clientset: %v", err)
+	}
+
+	// Get current context for display
+	currentContext, err := GetCurrentContext()
+	if err != nil {
+		currentContext = "unknown"
+	}
+
+	fmt.Printf("\033[36mpodcheck \033[0m on %s\n", currentContext)
+
+	// List pods
+	ctx := context.Background()
+	listOptions := metav1.ListOptions{}
+	pods, err := clientset.CoreV1().Pods(namespace).List(ctx, listOptions)
+	if err != nil {
+		return fmt.Errorf("failed to list pods: %v", err)
+	}
+
+	totalPods := len(pods.Items)
+	runningOrSucceeded := 0
+	failedPods := []string{}
+
+	for _, pod := range pods.Items {
+		phase := string(pod.Status.Phase)
+		podName := fmt.Sprintf("%s/%s", pod.Namespace, pod.Name)
+
+		if phase == "Running" || phase == "Succeeded" {
+			runningOrSucceeded++
+			fmt.Printf("%s \033[32m🟢 %s\033[0m\n", podName, phase)
+		} else {
+			failedPods = append(failedPods, fmt.Sprintf("%s (%s)", podName, phase))
+			fmt.Printf("%s \033[31m🔴 %s\033[0m\n", podName, phase)
+		}
+	}
+
+	fmt.Printf("\nSummary: %d/%d pods in Running or Succeeded state\n", runningOrSucceeded, totalPods)
+
+	if len(failedPods) > 0 {
+		fmt.Printf("\033[31mFailed pods:\033[0m\n")
+		for _, pod := range failedPods {
+			fmt.Printf("  - %s\n", pod)
+		}
+		return fmt.Errorf("%d pods not in Running or Succeeded state", len(failedPods))
+	}
+
+	return nil
+}
+
+// CheckFlux checks if all Flux HelmReleases and Kustomizations are in Ready state
+func CheckFlux(namespace string) error {
+	kubeconfigPath := getKubeConfig()
+
+	// Build config from kubeconfig file
+	config, err := clientcmd.BuildConfigFromFlags("", kubeconfigPath)
+	if err != nil {
+		return fmt.Errorf("failed to build config: %v", err)
+	}
+
+	// Get current context for display
+	currentContext, err := GetCurrentContext()
+	if err != nil {
+		currentContext = "unknown"
+	}
+
+	fmt.Printf("\033[36mfluxcheck \033[0m on %s\n", currentContext)
+
+	// Create a new scheme and add Flux types
+	fluxScheme := runtime.NewScheme()
+	_ = scheme.AddToScheme(fluxScheme)
+	_ = helmv2.AddToScheme(fluxScheme)
+	_ = kustomizev1.AddToScheme(fluxScheme)
+
+	// Create controller-runtime client
+	k8sClient, err := client.New(config, client.Options{Scheme: fluxScheme})
+	if err != nil {
+		return fmt.Errorf("failed to create client: %v", err)
+	}
+
+	ctx := context.Background()
+	totalResources := 0
+	readyResources := 0
+	failedResources := []string{}
+
+	// Check HelmReleases
+	helmReleaseList := &helmv2.HelmReleaseList{}
+	listOpts := []client.ListOption{}
+	if namespace != "" {
+		listOpts = append(listOpts, client.InNamespace(namespace))
+	}
+
+	err = k8sClient.List(ctx, helmReleaseList, listOpts...)
+	if err != nil {
+		return fmt.Errorf("failed to list HelmReleases: %v", err)
+	}
+
+	fmt.Printf("\n\033[1mHelmReleases:\033[0m\n")
+	for _, hr := range helmReleaseList.Items {
+		totalResources++
+		resourceName := fmt.Sprintf("%s/%s", hr.Namespace, hr.Name)
+		ready := false
+
+		// Check Ready condition
+		for _, condition := range hr.Status.Conditions {
+			if condition.Type == "Ready" {
+				if condition.Status == metav1.ConditionTrue {
+					ready = true
+					readyResources++
+					fmt.Printf("%s \033[32m🟢 Ready\033[0m (revision: %s)\n", resourceName, hr.Status.LastAttemptedRevision)
+				} else {
+					failedResources = append(failedResources, fmt.Sprintf("HelmRelease %s: %s", resourceName, condition.Message))
+					fmt.Printf("%s \033[31m🔴 Not Ready\033[0m - %s\n", resourceName, condition.Message)
+				}
+				break
+			}
+		}
+
+		if !ready && len(hr.Status.Conditions) == 0 {
+			failedResources = append(failedResources, fmt.Sprintf("HelmRelease %s: No conditions set", resourceName))
+			fmt.Printf("%s \033[33m⚠️  Unknown\033[0m - No conditions set\n", resourceName)
+		}
+	}
+
+	// Check Kustomizations
+	kustomizationList := &kustomizev1.KustomizationList{}
+	err = k8sClient.List(ctx, kustomizationList, listOpts...)
+	if err != nil {
+		return fmt.Errorf("failed to list Kustomizations: %v", err)
+	}
+
+	fmt.Printf("\n\033[1mKustomizations:\033[0m\n")
+	for _, ks := range kustomizationList.Items {
+		totalResources++
+		resourceName := fmt.Sprintf("%s/%s", ks.Namespace, ks.Name)
+		ready := false
+
+		// Check Ready condition
+		for _, condition := range ks.Status.Conditions {
+			if condition.Type == "Ready" {
+				if condition.Status == metav1.ConditionTrue {
+					ready = true
+					readyResources++
+					fmt.Printf("%s \033[32m🟢 Ready\033[0m (revision: %s)\n", resourceName, ks.Status.LastAppliedRevision)
+				} else {
+					failedResources = append(failedResources, fmt.Sprintf("Kustomization %s: %s", resourceName, condition.Message))
+					fmt.Printf("%s \033[31m🔴 Not Ready\033[0m - %s\n", resourceName, condition.Message)
+				}
+				break
+			}
+		}
+
+		if !ready && len(ks.Status.Conditions) == 0 {
+			failedResources = append(failedResources, fmt.Sprintf("Kustomization %s: No conditions set", resourceName))
+			fmt.Printf("%s \033[33m⚠️  Unknown\033[0m - No conditions set\n", resourceName)
+		}
+	}
+
+	fmt.Printf("\n\033[1mSummary:\033[0m %d/%d resources Ready\n", readyResources, totalResources)
+
+	if len(failedResources) > 0 {
+		fmt.Printf("\033[31m\nFailed resources:\033[0m\n")
+		for _, resource := range failedResources {
+			fmt.Printf("  - %s\n", resource)
+		}
+		return fmt.Errorf("%d resources not Ready", len(failedResources))
+	}
+
+	if totalResources == 0 {
+		fmt.Printf("\033[33mNo Flux resources found\033[0m\n")
+	}
+
+	return nil
 }
 
 // Run executes the cluster health check with the given options

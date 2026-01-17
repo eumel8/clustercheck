@@ -630,3 +630,78 @@ func BenchmarkQueryPrometheus(b *testing.B) {
 		}
 	}
 }
+
+func TestGetKubeConfig(t *testing.T) {
+	// Save original env vars
+	originalKubeConfig := os.Getenv("KUBECONFIG")
+	originalHome := os.Getenv("HOME")
+	defer func() {
+		os.Setenv("KUBECONFIG", originalKubeConfig)
+		os.Setenv("HOME", originalHome)
+	}()
+
+	t.Run("KUBECONFIG env var set", func(t *testing.T) {
+		expected := "/custom/path/to/kubeconfig"
+		os.Setenv("KUBECONFIG", expected)
+
+		result := getKubeConfig()
+		if result != expected {
+			t.Errorf("Expected %s, got %s", expected, result)
+		}
+	})
+
+	t.Run("KUBECONFIG not set, use HOME", func(t *testing.T) {
+		os.Setenv("KUBECONFIG", "")
+		os.Setenv("HOME", "/test/home")
+
+		expected := "/test/home/.kube/config"
+		result := getKubeConfig()
+		if result != expected {
+			t.Errorf("Expected %s, got %s", expected, result)
+		}
+	})
+}
+
+func TestCheckPodsWithInvalidConfig(t *testing.T) {
+	// Save original env vars
+	originalKubeConfig := os.Getenv("KUBECONFIG")
+	originalHome := os.Getenv("HOME")
+	defer func() {
+		os.Setenv("KUBECONFIG", originalKubeConfig)
+		os.Setenv("HOME", originalHome)
+	}()
+
+	// Set invalid kubeconfig path
+	os.Setenv("KUBECONFIG", "/nonexistent/path/to/kubeconfig")
+
+	err := CheckPods("")
+	if err == nil {
+		t.Error("Expected error for invalid kubeconfig, got nil")
+	}
+
+	if !strings.Contains(err.Error(), "failed to build config") {
+		t.Errorf("Expected 'failed to build config' error, got: %v", err)
+	}
+}
+
+func TestCheckFluxWithInvalidConfig(t *testing.T) {
+	// Save original env vars
+	originalKubeConfig := os.Getenv("KUBECONFIG")
+	originalHome := os.Getenv("HOME")
+	defer func() {
+		os.Setenv("KUBECONFIG", originalKubeConfig)
+		os.Setenv("HOME", originalHome)
+	}()
+
+	// Set invalid kubeconfig path
+	os.Setenv("KUBECONFIG", "/nonexistent/path/to/kubeconfig")
+
+	err := CheckFlux("")
+	if err == nil {
+		t.Error("Expected error for invalid kubeconfig, got nil")
+	}
+
+	if !strings.Contains(err.Error(), "failed to build config") {
+		t.Errorf("Expected 'failed to build config' error, got: %v", err)
+	}
+}
