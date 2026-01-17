@@ -11,7 +11,7 @@ Flux v2.4.0 has been successfully installed on the cluster with all controllers 
 ## Example Resources Created
 
 ### 1. HelmRepositories
-Created two HelmRepository resources:
+Created three HelmRepository resources:
 
 **Bitnami Repository** (`helmrepository.yaml`):
 - URL: https://charts.bitnami.com/bitnami
@@ -23,13 +23,32 @@ Created two HelmRepository resources:
 - Namespace: flux-system
 - Status: Ready
 
-### 2. HelmRelease
+**Prometheus Community Repository** (`helmrepository-prometheus.yaml`):
+- URL: https://prometheus-community.github.io/helm-charts
+- Namespace: flux-system
+- Status: Ready
+
+### 2. HelmReleases
+
 **Grafana Test Release** (`helmrelease.yaml`):
 - Chart: grafana v10.5.8
 - Source: grafana HelmRepository
 - Target Namespace: default
 - Status: Successfully deployed
 - Pod: Running
+
+**Prometheus Stack** (`helmrelease-prometheus.yaml`):
+- Chart: kube-prometheus-stack v81.0.0
+- Source: prometheus-community HelmRepository
+- Target Namespace: monitoring
+- Status: Successfully deployed
+- Components:
+  - Prometheus Server
+  - Prometheus Operator
+  - Grafana (with default dashboards)
+  - Node Exporter
+  - Kube State Metrics
+  - Various ServiceMonitors
 
 ### 3. GitRepository
 **Podinfo Repository** (`gitrepository.yaml`):
@@ -77,6 +96,40 @@ kubectl apply -f flux-examples/
 
 1. **Grafana** (via HelmRelease): Accessible in the `default` namespace
 2. **Podinfo** (via Kustomization): 2 replicas running in the `default` namespace
+3. **Prometheus Stack** (via HelmRelease): Complete monitoring solution in the `monitoring` namespace
+   - Prometheus Server (metrics storage and querying)
+   - Grafana (visualization, accessible at localhost:3000 via port-forward)
+   - Node Exporter (node metrics)
+   - Kube State Metrics (Kubernetes object metrics)
+
+## Accessing Monitoring Services
+
+### Prometheus
+```bash
+# Port-forward Prometheus
+kubectl port-forward -n monitoring svc/monitoring-kube-prometheus-prometheus 9090:9090
+
+# Access Prometheus UI
+open http://localhost:9090
+
+# Query API example
+curl http://localhost:9090/api/v1/query?query=up
+```
+
+### Grafana (from Prometheus Stack)
+```bash
+# Port-forward Grafana
+kubectl port-forward -n monitoring svc/monitoring-kube-prometheus-stack-grafana 3000:80
+
+# Access Grafana UI
+open http://localhost:3000
+
+# Default credentials
+Username: admin
+Password: admin
+```
+
+For detailed Prometheus setup and usage information, see [PROMETHEUS-SETUP.md](PROMETHEUS-SETUP.md).
 
 ## Verification Commands
 

@@ -1,0 +1,84 @@
+---
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: kube-prometheus-stack
+  namespace: flux-system
+spec:
+  interval: 5m
+  chart:
+    spec:
+      chart: kube-prometheus-stack
+      version: '>=65.0.0'
+      sourceRef:
+        kind: HelmRepository
+        name: prometheus-community
+        namespace: flux-system
+      interval: 1m
+  targetNamespace: monitoring
+  install:
+    createNamespace: true
+  values:
+    # Prometheus configuration
+    prometheus:
+      prometheusSpec:
+        retention: 2h
+        storageSpec:
+          volumeClaimTemplate:
+            spec:
+              accessModes: ["ReadWriteOnce"]
+              resources:
+                requests:
+                  storage: 5Gi
+        serviceMonitorSelectorNilUsesHelmValues: false
+        podMonitorSelectorNilUsesHelmValues: false
+        ruleSelectorNilUsesHelmValues: false
+
+    # Disable Alertmanager for simplicity
+    alertmanager:
+      enabled: false
+
+    # Grafana configuration
+    grafana:
+      enabled: true
+      adminPassword: admin
+      service:
+        type: ClusterIP
+      persistence:
+        enabled: false
+
+    # Node exporter
+    nodeExporter:
+      enabled: true
+
+    # Kube-state-metrics
+    kubeStateMetrics:
+      enabled: true
+
+    # Default service monitors
+    defaultRules:
+      create: true
+      rules:
+        alertmanager: false
+        etcd: false
+        configReloaders: false
+        general: false
+        k8s: true
+        kubeApiserverAvailability: true
+        kubeApiserverSlos: false
+        kubelet: true
+        kubeProxy: false
+        kubePrometheusGeneral: false
+        kubePrometheusNodeRecording: false
+        kubernetesApps: true
+        kubernetesResources: false
+        kubernetesStorage: false
+        kubernetesSystem: true
+        kubeScheduler: false
+        kubeStateMetrics: true
+        network: false
+        node: true
+        nodeExporterAlerting: false
+        nodeExporterRecording: false
+        prometheus: true
+        prometheusOperator: false
