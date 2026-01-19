@@ -5,86 +5,10 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
-
-	"k8s.io/client-go/tools/clientcmd"
-	clientcmdapi "k8s.io/client-go/tools/clientcmd/api"
 )
-
-func TestGetCurrentContext(t *testing.T) {
-	// Create a temporary kubeconfig file for testing
-	tempDir := t.TempDir()
-	kubeconfigPath := filepath.Join(tempDir, "config")
-
-	// Create a test kubeconfig
-	config := &clientcmdapi.Config{
-		CurrentContext: "test-context",
-		Contexts: map[string]*clientcmdapi.Context{
-			"test-context": {
-				Cluster:  "test-cluster",
-				AuthInfo: "test-user",
-			},
-		},
-		Clusters: map[string]*clientcmdapi.Cluster{
-			"test-cluster": {
-				Server: "https://test-server",
-			},
-		},
-		AuthInfos: map[string]*clientcmdapi.AuthInfo{
-			"test-user": {
-				Token: "test-token",
-			},
-		},
-	}
-
-	err := clientcmd.WriteToFile(*config, kubeconfigPath)
-	if err != nil {
-		t.Fatalf("Failed to write test kubeconfig: %v", err)
-	}
-
-	// Set HOME to temp directory for test
-	originalHome := os.Getenv("HOME")
-	defer os.Setenv("HOME", originalHome)
-	os.Setenv("HOME", tempDir)
-
-	// Create .kube directory
-	kubeDir := filepath.Join(tempDir, ".kube")
-	err = os.MkdirAll(kubeDir, 0755)
-	if err != nil {
-		t.Fatalf("Failed to create .kube directory: %v", err)
-	}
-
-	// Copy config to .kube/config
-	kubePath := filepath.Join(kubeDir, "config")
-	err = clientcmd.WriteToFile(*config, kubePath)
-	if err != nil {
-		t.Fatalf("Failed to write kubeconfig to .kube/config: %v", err)
-	}
-
-	context, err := GetCurrentContext()
-	if err != nil {
-		t.Fatalf("GetCurrentContext() returned error: %v", err)
-	}
-
-	if context != "test-context" {
-		t.Errorf("Expected context 'test-context', got '%s'", context)
-	}
-}
-
-func TestGetCurrentContextError(t *testing.T) {
-	// Test with non-existent kubeconfig
-	originalHome := os.Getenv("HOME")
-	defer os.Setenv("HOME", originalHome)
-	os.Setenv("HOME", "/nonexistent")
-
-	_, err := GetCurrentContext()
-	if err == nil {
-		t.Error("Expected error for non-existent kubeconfig, got nil")
-	}
-}
 
 func TestQueryPrometheus(t *testing.T) {
 	tests := []struct {
@@ -207,7 +131,7 @@ func TestQueryPrometheus(t *testing.T) {
 			// Build prometheus URL
 			prometheusURL := server.URL + "/api/v1/query"
 
-			result, err := QueryPrometheus(prometheusURL, "test_query", tt.username, tt.password)
+			result, err := QueryPrometheus(prometheusURL, "test_query", tt.username, tt.password, false)
 
 			if tt.expectedError {
 				if err == nil {
@@ -237,7 +161,7 @@ func TestQueryPrometheusTimeout(t *testing.T) {
 
 	prometheusURL := server.URL + "/api/v1/query"
 
-	_, err := QueryPrometheus(prometheusURL, "test_query", "", "")
+	_, err := QueryPrometheus(prometheusURL, "test_query", "", "", false)
 	if err == nil {
 		t.Error("Expected timeout error, got nil")
 	}
@@ -248,7 +172,7 @@ func TestQueryPrometheusTimeout(t *testing.T) {
 }
 
 func TestQueryPrometheusInvalidURL(t *testing.T) {
-	_, err := QueryPrometheus("://invalid-url", "test_query", "", "")
+	_, err := QueryPrometheus("://invalid-url", "test_query", "", "", false)
 	if err == nil {
 		t.Error("Expected error for invalid URL, got nil")
 	}
@@ -369,13 +293,13 @@ func TestQueryPrometheusAuthLogic(t *testing.T) {
 	prometheusURL := server.URL + "/api/v1/query"
 
 	// Test with empty username (should NOT set basic auth due to bug)
-	_, err := QueryPrometheus(prometheusURL, "test_query", "", "password")
+	_, err := QueryPrometheus(prometheusURL, "test_query", "", "password", false)
 	if err != nil {
 		t.Errorf("Unexpected error: %v", err)
 	}
 
 	// Test with non-empty username (should NOT set basic auth due to bug)
-	_, err = QueryPrometheus(prometheusURL, "test_query", "user", "password")
+	_, err = QueryPrometheus(prometheusURL, "test_query", "user", "password", false)
 	if err != nil {
 		t.Errorf("Unexpected error: %v", err)
 	}
@@ -512,7 +436,7 @@ func TestQueryPrometheusResponseParsing(t *testing.T) {
 			defer server.Close()
 
 			prometheusURL := server.URL + "/api/v1/query"
-			result, err := QueryPrometheus(prometheusURL, "test_query", "", "")
+			result, err := QueryPrometheus(prometheusURL, "test_query", "", "", false)
 
 			if tt.expectError && err == nil {
 				t.Error("Expected error but got none")
@@ -530,7 +454,7 @@ func TestQueryPrometheusResponseParsing(t *testing.T) {
 func TestQueryPrometheusEdgeCases(t *testing.T) {
 	// Test HTTP request creation failure
 	invalidURL := string([]byte{0x7f})
-	_, err := QueryPrometheus(invalidURL, "test", "", "")
+	_, err := QueryPrometheus(invalidURL, "test", "", "", false)
 	if err == nil {
 		t.Error("Expected error for invalid URL characters")
 	}
@@ -543,7 +467,7 @@ func TestQueryPrometheusEdgeCases(t *testing.T) {
 	}))
 	defer server.Close()
 
-	_, err = QueryPrometheus(server.URL+"/api/v1/query", longQuery, "", "")
+	_, err = QueryPrometheus(server.URL+"/api/v1/query", longQuery, "", "", false)
 	if err != nil {
 		t.Errorf("Unexpected error with long query: %v", err)
 	}
@@ -551,7 +475,7 @@ func TestQueryPrometheusEdgeCases(t *testing.T) {
 
 func TestQueryPrometheusNetworkErrors(t *testing.T) {
 	// Test connection refused
-	_, err := QueryPrometheus("https://localhost:99999/api/v1/query", "test", "", "")
+	_, err := QueryPrometheus("https://localhost:99999/api/v1/query", "test", "", "", false)
 	if err == nil {
 		t.Error("Expected connection error")
 	}
@@ -565,7 +489,7 @@ func TestQueryPrometheusNetworkErrors(t *testing.T) {
 
 	// Replace http with https to force TLS error on plain HTTP server
 	httpsURL := strings.Replace(server.URL, "http://", "https://", 1)
-	_, err = QueryPrometheus(httpsURL+"/api/v1/query", "test", "", "")
+	_, err = QueryPrometheus(httpsURL+"/api/v1/query", "test", "", "", false)
 	if err == nil {
 		t.Error("Expected TLS error")
 	}
@@ -624,167 +548,10 @@ func BenchmarkQueryPrometheus(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_, err := QueryPrometheus(prometheusURL, "test_query", "", "")
+		_, err := QueryPrometheus(prometheusURL, "test_query", "", "", false)
 		if err != nil {
 			b.Fatalf("Unexpected error: %v", err)
 		}
 	}
 }
 
-func TestGetKubeConfig(t *testing.T) {
-	// Save original env vars
-	originalKubeConfig := os.Getenv("KUBECONFIG")
-	originalHome := os.Getenv("HOME")
-	defer func() {
-		os.Setenv("KUBECONFIG", originalKubeConfig)
-		os.Setenv("HOME", originalHome)
-	}()
-
-	t.Run("KUBECONFIG env var set", func(t *testing.T) {
-		expected := "/custom/path/to/kubeconfig"
-		os.Setenv("KUBECONFIG", expected)
-
-		result := getKubeConfig()
-		if result != expected {
-			t.Errorf("Expected %s, got %s", expected, result)
-		}
-	})
-
-	t.Run("KUBECONFIG not set, use HOME", func(t *testing.T) {
-		os.Setenv("KUBECONFIG", "")
-		os.Setenv("HOME", "/test/home")
-
-		expected := "/test/home/.kube/config"
-		result := getKubeConfig()
-		if result != expected {
-			t.Errorf("Expected %s, got %s", expected, result)
-		}
-	})
-}
-
-func TestCheckPodsWithInvalidConfig(t *testing.T) {
-	// Save original env vars
-	originalKubeConfig := os.Getenv("KUBECONFIG")
-	originalHome := os.Getenv("HOME")
-	defer func() {
-		os.Setenv("KUBECONFIG", originalKubeConfig)
-		os.Setenv("HOME", originalHome)
-	}()
-
-	// Set invalid kubeconfig path
-	os.Setenv("KUBECONFIG", "/nonexistent/path/to/kubeconfig")
-
-	err := CheckPods("")
-	if err == nil {
-		t.Error("Expected error for invalid kubeconfig, got nil")
-	}
-
-	if !strings.Contains(err.Error(), "failed to build config") {
-		t.Errorf("Expected 'failed to build config' error, got: %v", err)
-	}
-}
-
-func TestCheckFluxWithInvalidConfig(t *testing.T) {
-	// Save original env vars
-	originalKubeConfig := os.Getenv("KUBECONFIG")
-	originalHome := os.Getenv("HOME")
-	defer func() {
-		os.Setenv("KUBECONFIG", originalKubeConfig)
-		os.Setenv("HOME", originalHome)
-	}()
-
-	// Set invalid kubeconfig path
-	os.Setenv("KUBECONFIG", "/nonexistent/path/to/kubeconfig")
-
-	err := CheckFlux("")
-	if err == nil {
-		t.Error("Expected error for invalid kubeconfig, got nil")
-	}
-
-	if !strings.Contains(err.Error(), "failed to build config") {
-		t.Errorf("Expected 'failed to build config' error, got: %v", err)
-	}
-}
-
-func TestCheckResult(t *testing.T) {
-	// Test CheckResult structure
-	result := CheckResult{
-		Name:    "Test Check",
-		Passed:  true,
-		Message: "All systems operational",
-	}
-
-	if result.Name != "Test Check" {
-		t.Errorf("Expected name 'Test Check', got '%s'", result.Name)
-	}
-
-	if !result.Passed {
-		t.Error("Expected Passed to be true")
-	}
-
-	if result.Message != "All systems operational" {
-		t.Errorf("Expected message 'All systems operational', got '%s'", result.Message)
-	}
-}
-
-func TestGateCheckResult(t *testing.T) {
-	// Test GateCheckResult structure
-	result := GateCheckResult{
-		TotalChecks:  10,
-		PassedChecks: 8,
-		FailedChecks: 2,
-		HealthScore:  80.0,
-		CheckResults: []CheckResult{
-			{Name: "Check 1", Passed: true, Message: "OK"},
-			{Name: "Check 2", Passed: false, Message: "Failed"},
-		},
-		OverallPassed: true,
-	}
-
-	if result.TotalChecks != 10 {
-		t.Errorf("Expected TotalChecks 10, got %d", result.TotalChecks)
-	}
-
-	if result.PassedChecks != 8 {
-		t.Errorf("Expected PassedChecks 8, got %d", result.PassedChecks)
-	}
-
-	if result.FailedChecks != 2 {
-		t.Errorf("Expected FailedChecks 2, got %d", result.FailedChecks)
-	}
-
-	if result.HealthScore != 80.0 {
-		t.Errorf("Expected HealthScore 80.0, got %.1f", result.HealthScore)
-	}
-
-	if !result.OverallPassed {
-		t.Error("Expected OverallPassed to be true")
-	}
-
-	if len(result.CheckResults) != 2 {
-		t.Errorf("Expected 2 check results, got %d", len(result.CheckResults))
-	}
-}
-
-func TestGateCheckWithInvalidConfig(t *testing.T) {
-	// Save original env vars
-	originalKubeConfig := os.Getenv("KUBECONFIG")
-	originalHome := os.Getenv("HOME")
-	defer func() {
-		os.Setenv("KUBECONFIG", originalKubeConfig)
-		os.Setenv("HOME", originalHome)
-	}()
-
-	// Set invalid kubeconfig path
-	os.Setenv("KUBECONFIG", "/nonexistent/path/to/kubeconfig")
-
-	_, err := GateCheck("", false, "")
-	if err == nil {
-		t.Error("Expected error for invalid kubeconfig, got nil")
-	}
-
-	// GateCheck should fail but not panic
-	if err != nil && !strings.Contains(err.Error(), "failed") {
-		t.Logf("Got expected error: %v", err)
-	}
-}

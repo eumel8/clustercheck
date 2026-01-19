@@ -42,8 +42,8 @@ func getSessionToken() string {
 	return os.Getenv("BW_SESSION")
 }
 
-// Run Bitwarden CLI to get the item JSON
-func getBitwardenItemJSON(itemName string) ([]byte, error) {
+// GetBitwardenItemJSON runs Bitwarden CLI to get the item JSON
+func GetBitwardenItemJSON(itemName string) ([]byte, error) {
 	cmd := exec.Command("bw", "get", "item", itemName)
 	cmd.Env = append(os.Environ(), "BW_SESSION="+getSessionToken())
 
@@ -89,11 +89,20 @@ func GetCurrentContext() (string, error) {
 }
 
 // QueryPrometheus queries Prometheus with the given parameters
-func QueryPrometheus(prometheus string, query string, username string, password string) (string, error) {
+func QueryPrometheus(prometheus string, query string, username string, password string, debug bool) (string, error) {
 	value := "0"
 	params := url.Values{}
 	params.Add("query", query)
 	url := fmt.Sprintf("%s/api/v1/query?%s", prometheus, params.Encode())
+
+	if debug {
+		fmt.Printf("\n[DEBUG] Prometheus API Request:\n")
+		fmt.Printf("  URL: %s\n", url)
+		fmt.Printf("  Query: %s\n", query)
+		if username != "" {
+			fmt.Printf("  Auth: Basic (username: %s)\n", username)
+		}
+	}
 
 	req, err := http.NewRequest("GET", url, nil)
 	if err != nil {
@@ -113,13 +122,25 @@ func QueryPrometheus(prometheus string, query string, username string, password 
 	}
 	resp, err := insecureClient.Do(req)
 	if err != nil {
+		if debug {
+			fmt.Printf("[DEBUG] Prometheus API Error: %v\n\n", err)
+		}
 		return value, err
 	}
 	defer resp.Body.Close()
 
+	if debug {
+		fmt.Printf("  Status Code: %d\n", resp.StatusCode)
+	}
+
 	body, err := ioutil.ReadAll(resp.Body)
 	if err != nil {
 		return value, err
+	}
+
+	if debug {
+		fmt.Printf("[DEBUG] Prometheus API Response:\n")
+		fmt.Printf("  Body: %s\n\n", string(body))
 	}
 
 	// Define a structure matching the Prometheus response
@@ -159,7 +180,7 @@ func getKubeConfig() string {
 }
 
 // CheckPods checks if all pods in the cluster are in Running or Succeeded state
-func CheckPods(namespace string) error {
+func CheckPods(namespace string, debug bool) error {
 	kubeconfigPath := getKubeConfig()
 
 	// Build config from kubeconfig file
@@ -221,7 +242,7 @@ func CheckPods(namespace string) error {
 }
 
 // CheckFlux checks if all Flux HelmReleases and Kustomizations are in Ready state
-func CheckFlux(namespace string) error {
+func CheckFlux(namespace string, debug bool) error {
 	kubeconfigPath := getKubeConfig()
 
 	// Build config from kubeconfig file
@@ -363,7 +384,7 @@ type GateCheckResult struct {
 }
 
 // GateCheck performs all health checks and computes an overall health score
-func GateCheck(namespace string, bitwarden bool, fqdn string) (*GateCheckResult, error) {
+func GateCheck(namespace string, bitwarden bool, fqdn string, debug bool) (*GateCheckResult, error) {
 	result := &GateCheckResult{
 		CheckResults: []CheckResult{},
 	}
@@ -381,7 +402,7 @@ func GateCheck(namespace string, bitwarden bool, fqdn string) (*GateCheckResult,
 	// 1. Pod Health Check
 	fmt.Printf("\033[1m[1/3] Pod Health Check\033[0m\n")
 	fmt.Println("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
-	podErr := CheckPods(namespace)
+	podErr := CheckPods(namespace, debug)
 	if podErr == nil {
 		result.CheckResults = append(result.CheckResults, CheckResult{
 			Name:    "Pod Health",
@@ -403,7 +424,7 @@ func GateCheck(namespace string, bitwarden bool, fqdn string) (*GateCheckResult,
 	// 2. Flux Resources Check
 	fmt.Printf("\033[1m[2/3] Flux Resources Check\033[0m\n")
 	fmt.Println("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
-	fluxErr := CheckFlux(namespace)
+	fluxErr := CheckFlux(namespace, debug)
 	if fluxErr == nil {
 		result.CheckResults = append(result.CheckResults, CheckResult{
 			Name:    "Flux Resources",
@@ -425,7 +446,7 @@ func GateCheck(namespace string, bitwarden bool, fqdn string) (*GateCheckResult,
 	// 3. Prometheus Monitoring Check
 	fmt.Printf("\033[1m[3/3] Prometheus Monitoring Check\033[0m\n")
 	fmt.Println("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
-	monitoringChecks, monitoringPassed := runPrometheusChecks(bitwarden, fqdn)
+	monitoringChecks, monitoringPassed := runPrometheusChecks(bitwarden, fqdn, debug)
 
 	for _, check := range monitoringChecks {
 		result.CheckResults = append(result.CheckResults, check)
@@ -498,7 +519,7 @@ func GateCheck(namespace string, bitwarden bool, fqdn string) (*GateCheckResult,
 }
 
 // runPrometheusChecks executes Prometheus monitoring checks and returns results
-func runPrometheusChecks(bitwarden bool, fqdn string) ([]CheckResult, bool) {
+func runPrometheusChecks(bitwarden bool, fqdn string, debug bool) ([]CheckResult, bool) {
 	results := []CheckResult{}
 
 	// static Prometheus API endpoint
@@ -510,7 +531,7 @@ func runPrometheusChecks(bitwarden bool, fqdn string) ([]CheckResult, bool) {
 
 	if bitwarden == true || clcBW != "" {
 		itemName := "Prometheus Agent RemoteWrite"
-		jsonData, err := getBitwardenItemJSON(itemName)
+		jsonData, err := GetBitwardenItemJSON(itemName)
 		if err != nil {
 			results = append(results, CheckResult{
 				Name:    "Prometheus Authentication",
@@ -577,7 +598,7 @@ func runPrometheusChecks(bitwarden bool, fqdn string) ([]CheckResult, bool) {
 
 	allPassed := true
 	for _, query := range queries {
-		result, err := QueryPrometheus(prometheus, query.Query, username, password)
+		result, err := QueryPrometheus(prometheus, query.Query, username, password, debug)
 		if err != nil {
 			results = append(results, CheckResult{
 				Name:    query.Description,
@@ -610,7 +631,7 @@ func runPrometheusChecks(bitwarden bool, fqdn string) ([]CheckResult, bool) {
 }
 
 // Run executes the cluster health check with the given options
-func Run(bitwarden bool, fqdn string) {
+func Run(bitwarden bool, fqdn string, debug bool) {
 	// static Prometheus API endpoint
 	prometheus := "https://127.0.0.1:9090"
 	username := os.Getenv("PROM_USER")
@@ -621,7 +642,7 @@ func Run(bitwarden bool, fqdn string) {
 	if bitwarden == true || clcBW != "" {
 		// doing bitwarden stuff here to get prometheus credentials
 		itemName := "Prometheus Agent RemoteWrite"
-		jsonData, err := getBitwardenItemJSON(itemName)
+		jsonData, err := GetBitwardenItemJSON(itemName)
 		if err != nil {
 			fmt.Printf("Failed to get item from Bitwarden: %v\n", err)
 		}
@@ -712,7 +733,7 @@ func Run(bitwarden bool, fqdn string) {
 
 	fmt.Printf("\033[36mclustercheck \033[0m on %s\n", cluster)
 	for _, query := range queries {
-		result, err := QueryPrometheus(prometheus, query.Query, username, password)
+		result, err := QueryPrometheus(prometheus, query.Query, username, password, debug)
 		if err != nil {
 			fmt.Println("Error query :", query.Description, err)
 		} else {
