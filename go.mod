@@ -1,4 +1,4 @@
-module main.go
+module github.com/eumel8/clustercheck
 
 go 1.25.0
 
