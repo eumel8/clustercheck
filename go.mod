@@ -3,7 +3,6 @@ module github.com/eumel8/clustercheck
 go 1.25.0
 
 require (
-	github.com/eumel8/clustercheck v0.0.0-20260121094404-86a6eebc11a0
 	github.com/fluxcd/helm-controller/api v1.4.5
 	github.com/fluxcd/kustomize-controller/api v1.7.3
 	github.com/mattn/go-runewidth v0.0.19
