@@ -17,7 +17,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"time"
-	"unicode/utf8"
 	"strings"
 	"github.com/mattn/go-runewidth"
 
