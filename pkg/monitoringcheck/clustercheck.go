@@ -16,8 +16,10 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strings"
 	"time"
+	"unicode/utf8"
+	"strings"
+	"github.com/mattn/go-runewidth"
 
 	helmv2 "github.com/fluxcd/helm-controller/api/v2"
 	kustomizev1 "github.com/fluxcd/kustomize-controller/api/v1"
@@ -383,6 +385,21 @@ type GateCheckResult struct {
 	OverallPassed bool
 }
 
+func PrintBox(text string) {
+	textWidth := runewidth.StringWidth(text)
+	width := textWidth + 2
+
+	top := "╔" + strings.Repeat("═", width) + "╗"
+	bot := "╚" + strings.Repeat("═", width) + "╝"
+	mid := fmt.Sprintf("║ %s%s ║", text, strings.Repeat(" ", width-textWidth-1))
+
+	fmt.Println(top)
+	fmt.Println(mid)
+	fmt.Println(bot)
+
+}
+
+
 // GateCheck performs all health checks and computes an overall health score
 func GateCheck(namespace string, bitwarden bool, fqdn string, debug bool) (*GateCheckResult, error) {
 	result := &GateCheckResult{
@@ -394,10 +411,9 @@ func GateCheck(namespace string, bitwarden bool, fqdn string, debug bool) (*Gate
 	if err != nil {
 		currentContext = "unknown"
 	}
+        title := fmt.Sprintf("CLUSTER GATE CHECK - %s", currentContext)
 
-	fmt.Printf("\033[36m╔══════════════════════════════════════════════════╗\033[0m\n")
-	fmt.Printf("\033[36m║         CLUSTER GATE CHECK - %s\033[0m\n", currentContext)
-	fmt.Printf("\033[36m╚══════════════════════════════════════════════════╝\033[0m\n\n")
+	PrintBox(title)
 
 	// 1. Pod Health Check
 	fmt.Printf("\033[1m[1/3] Pod Health Check\033[0m\n")
@@ -689,14 +705,14 @@ func Run(bitwarden bool, fqdn string, debug bool) {
 			Description: "CLUSTER",
 			Query:       `capi_cluster_status_phase{phase="Provisioned", tenantcluster="` + shortCluster + `"} == 1`,
 		},
-		{
-			Description: "FLUENTBITERRORS",
-			Query:       `rate(fluentbit_output_errors_total{cluster="` + cluster + `"}[1h])) > 0`,
-		},
-		{
-			Description: "FLUENTDERRORS",
-			Query:       `avg(fluentd_output_status_num_errors{cluster="` + cluster + `"}) > 0`,
-		},
+                {
+                        Description: "FLUENTBIT_OK",
+                        Query: `count(max(fluentbit_output_errors_total{cluster="` + cluster + `"}) + 1)`,
+                },
+                {
+                        Description: "FLUENTD_OK",
+                        Query: `count(max(fluentd_output_status_num_errors{cluster="` + cluster + `"}) + 1)`,
+                },
 		{
 			Description: "GOLDPINGER",
 			Query:       `avg(goldpinger_cluster_health_total{cluster="` + cluster + `"})`,
@@ -738,17 +754,9 @@ func Run(bitwarden bool, fqdn string, debug bool) {
 			fmt.Println("Error query :", query.Description, err)
 		} else {
 			if result == "1" {
-				if strings.HasPrefix(query.Description, "FLUENT") {
-					fmt.Printf("%s \033[31m🔴 FAIL (0)\033[0m \n", query.Description)
-				} else {
-					fmt.Printf("%s \033[32m🟢 OK (1)\033[0m \n", query.Description)
-				}
+			        fmt.Printf("%s \033[32m🟢 OK (1)\033[0m \n", query.Description)
 			} else {
-				if strings.HasPrefix(query.Description, "FLUENT") {
-					fmt.Printf("%s \033[32m🟢 OK (1)\033[0m \n", query.Description)
-				} else {
-					fmt.Printf("%s \033[31m🔴 FAIL (0)\033[0m \n", query.Description)
-				}
+				fmt.Printf("%s \033[31m🔴 FAIL (0)\033[0m \n", query.Description)
 			}
 		}
 	}

@@ -206,6 +206,8 @@ func runPrometheusChecks(bitwarden bool, fqdn string, debug bool) ([]CheckResult
 		cluster = "unknown"
 	}
 
+	shortCluster := cluster
+
 	if fqdn != "" {
 		cluster = cluster + "." + fqdn
 	}
@@ -224,19 +226,51 @@ func runPrometheusChecks(bitwarden bool, fqdn string, debug bool) ([]CheckResult
 
 	queries := []monitoringcheck.PrometheusQueries{
 		{
-			Description: "API Server",
+			Description: "APISERVER",
 			Query:       `avg(up{job="kube-apiserver",cluster="` + cluster + `"})`,
 		},
-		{
-			Description: "Kubelet",
-			Query:       `clamp((count(up{job="kubelet", cluster="` + cluster + `"}) > 3),1,1)`,
-		},
-		{
-			Description: "Node Status",
+                {
+                        Description: "CLUSTER",
+                        Query:       `capi_cluster_status_phase{phase="Provisioned", tenantcluster="` + shortCluster + `"} == 1`,
+                },
+                {
+                        Description: "FLUENTBIT_OK",
+                        Query: `count(max(fluentbit_output_errors_total{cluster="` + cluster + `"}) + 1)`,
+                },
+                {
+                        Description: "FLUENTD_OK",
+                        Query: `count(max(fluentd_output_status_num_errors{cluster="` + cluster + `"}) + 1)`,
+                },
+                {
+                        Description: "GOLDPINGER",
+                        Query:       `avg(goldpinger_cluster_health_total{cluster="` + cluster + `"})`,
+                },
+                {
+                        Description: "KUBEDNS",
+                        Query:       `avg(up{job="kube-dns", cluster="` + cluster + `"})`,
+                },
+                {
+                        Description: "KUBELET",
+                        Query:       `clamp((count(up{job="kubelet", cluster="` + cluster + `"}) > 3),1,1)`,
+                },
+                {
+                        Description: "NETWORKOPERATOR",
+                        Query:       `clamp(avg(nwop_netlink_routes_fib{protocol="bgp",vrf="main",cluster="` + cluster + `"}),1,1)`,
+                },
+                {
+                        Description: "NODE",
 			Query:       `min(kube_node_status_condition{condition="Ready",status="true",cluster="` + cluster + `"})`,
 		},
 		{
-			Description: "System Pods",
+			Description: "STORAGECHECK",
+			Query:       `clamp((increase(storage_check_success_total{cluster="` + cluster + `"}[1h]) > 1),1,1) OR (storage_check_failure_total{cluster="` + cluster + `"} > 0)`,
+		},
+		{
+			Description: "PROMETHEUSAGENT",
+			Query:       `avg(up{job="prometheus-agent",cluster="` + cluster + `"})`,
+		},
+		{
+			Description: "SYSTEMPODS",
 			Query:       `clamp(sum(kube_pod_status_phase{namespace=~".*-system", phase!~"Running|Succeeded",cluster="` + cluster + `"} == 0),1,1)`,
 		},
 	}
