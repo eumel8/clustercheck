@@ -4,7 +4,7 @@ go 1.25.0
 
 require (
 	github.com/fluxcd/helm-controller/api v1.5.0
-	github.com/fluxcd/kustomize-controller/api v1.7.3
+	github.com/fluxcd/kustomize-controller/api v1.8.0
 	github.com/mattn/go-runewidth v0.0.20
 	k8s.io/apimachinery v0.35.1
 	k8s.io/client-go v0.35.0
