@@ -8,7 +8,7 @@ require (
 	github.com/mattn/go-runewidth v0.0.20
 	k8s.io/apimachinery v0.35.1
 	k8s.io/client-go v0.35.0
-	sigs.k8s.io/controller-runtime v0.23.1
+	sigs.k8s.io/controller-runtime v0.23.3
 )
 
 require (
