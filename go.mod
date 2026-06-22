@@ -6,7 +6,7 @@ require (
 	github.com/fluxcd/helm-controller/api v1.5.4
 	github.com/fluxcd/kustomize-controller/api v1.8.4
 	github.com/mattn/go-runewidth v0.0.23
-	k8s.io/apimachinery v0.36.1
+	k8s.io/apimachinery v0.36.2
 	k8s.io/client-go v0.36.0
 	sigs.k8s.io/controller-runtime v0.24.1
 )
