@@ -364,7 +364,7 @@ func TestMainQueriesStructure(t *testing.T) {
 		},
 		{
 			Description: "STORAGECHECK",
-			Query:       `clamp((increase(storage_check_success_total{cluster="` + cluster + `"}[1h]) > 1),1,1) OR (storage_check_failure_total{cluster="` + cluster + `"} > 0)`,
+			Query:       `clamp((increase(storage_check_success_total{cluster="` + cluster + `"}[1h]) >= 1),1,1)`,
 		},
 		{
 			Description: "PROMETHEUSAGENT",
