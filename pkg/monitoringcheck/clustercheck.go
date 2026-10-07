@@ -726,7 +726,7 @@ func Run(bitwarden bool, fqdn string, debug bool) {
 		},
 		{
 			Description: "NETWORKOPERATOR",
-			Query:       `clamp(avg(nwop_netlink_routes_fib{protocol="bgp",vrf="main",cluster="` + cluster + `"}),1,1)`,
+			Query:       `clamp(avg(nwop_netlink_routes_fib{protocol="bgp",vrf="main",cluster="` + cluster + `"}),1,1) or clamp(avg(nwop_vsr_routes_fib{protocol="bgp",vrf="main",cluster="` + cluster + `"}),1,1)`,
 		},
 		{
 			Description: "NODE",
