@@ -1,5 +1,5 @@
 # clustercheck
-![Coverage](https://img.shields.io/badge/Coverage-20.9%25-red)
+![Coverage](https://img.shields.io/badge/Coverage-17.9%25-red)
 
 ## intro
 
