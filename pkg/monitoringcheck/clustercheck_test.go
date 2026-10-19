@@ -8,6 +8,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/eumel8/clustercheck/pkg/promcheck"
 )
 
 func TestQueryPrometheus(t *testing.T) {
@@ -131,7 +133,7 @@ func TestQueryPrometheus(t *testing.T) {
 			// Build prometheus URL
 			prometheusURL := server.URL + "/api/v1/query"
 
-			result, err := QueryPrometheus(prometheusURL, "test_query", tt.username, tt.password, false)
+			result, err := promcheck.QueryPrometheus(prometheusURL, "test_query", tt.username, tt.password, false)
 
 			if tt.expectedError {
 				if err == nil {
@@ -161,7 +163,7 @@ func TestQueryPrometheusTimeout(t *testing.T) {
 
 	prometheusURL := server.URL + "/api/v1/query"
 
-	_, err := QueryPrometheus(prometheusURL, "test_query", "", "", false)
+	_, err := promcheck.QueryPrometheus(prometheusURL, "test_query", "", "", false)
 	if err == nil {
 		t.Error("Expected timeout error, got nil")
 	}
@@ -172,7 +174,7 @@ func TestQueryPrometheusTimeout(t *testing.T) {
 }
 
 func TestQueryPrometheusInvalidURL(t *testing.T) {
-	_, err := QueryPrometheus("://invalid-url", "test_query", "", "", false)
+	_, err := promcheck.QueryPrometheus("://invalid-url", "test_query", "", "", false)
 	if err == nil {
 		t.Error("Expected error for invalid URL, got nil")
 	}
@@ -218,7 +220,7 @@ func TestPrometheusResponseStructs(t *testing.T) {
 
 func TestPrometheusQueries(t *testing.T) {
 	// Test PrometheusQueries struct
-	query := PrometheusQueries{
+	query := promcheck.Query{
 		Description: "Test Query",
 		Query:       "up{job=\"test\"}",
 	}
@@ -293,13 +295,13 @@ func TestQueryPrometheusAuthLogic(t *testing.T) {
 	prometheusURL := server.URL + "/api/v1/query"
 
 	// Test with empty username (should NOT set basic auth due to bug)
-	_, err := QueryPrometheus(prometheusURL, "test_query", "", "password", false)
+	_, err := promcheck.QueryPrometheus(prometheusURL, "test_query", "", "password", false)
 	if err != nil {
 		t.Errorf("Unexpected error: %v", err)
 	}
 
 	// Test with non-empty username (should NOT set basic auth due to bug)
-	_, err = QueryPrometheus(prometheusURL, "test_query", "user", "password", false)
+	_, err = promcheck.QueryPrometheus(prometheusURL, "test_query", "user", "password", false)
 	if err != nil {
 		t.Errorf("Unexpected error: %v", err)
 	}
@@ -325,7 +327,7 @@ func TestMainQueriesStructure(t *testing.T) {
 	// This would be the queries slice from Run function
 	// We simulate it here for testing
 	cluster := "test-cluster"
-	queries := []PrometheusQueries{
+	queries := []promcheck.Query{
 		{
 			Description: "APISERVER",
 			Query:       `avg(up{job="kube-apiserver",cluster="` + cluster + `"})`,
@@ -436,7 +438,7 @@ func TestQueryPrometheusResponseParsing(t *testing.T) {
 			defer server.Close()
 
 			prometheusURL := server.URL + "/api/v1/query"
-			result, err := QueryPrometheus(prometheusURL, "test_query", "", "", false)
+			result, err := promcheck.QueryPrometheus(prometheusURL, "test_query", "", "", false)
 
 			if tt.expectError && err == nil {
 				t.Error("Expected error but got none")
@@ -454,7 +456,7 @@ func TestQueryPrometheusResponseParsing(t *testing.T) {
 func TestQueryPrometheusEdgeCases(t *testing.T) {
 	// Test HTTP request creation failure
 	invalidURL := string([]byte{0x7f})
-	_, err := QueryPrometheus(invalidURL, "test", "", "", false)
+	_, err := promcheck.QueryPrometheus(invalidURL, "test", "", "", false)
 	if err == nil {
 		t.Error("Expected error for invalid URL characters")
 	}
@@ -467,7 +469,7 @@ func TestQueryPrometheusEdgeCases(t *testing.T) {
 	}))
 	defer server.Close()
 
-	_, err = QueryPrometheus(server.URL+"/api/v1/query", longQuery, "", "", false)
+	_, err = promcheck.QueryPrometheus(server.URL+"/api/v1/query", longQuery, "", "", false)
 	if err != nil {
 		t.Errorf("Unexpected error with long query: %v", err)
 	}
@@ -475,7 +477,7 @@ func TestQueryPrometheusEdgeCases(t *testing.T) {
 
 func TestQueryPrometheusNetworkErrors(t *testing.T) {
 	// Test connection refused
-	_, err := QueryPrometheus("https://localhost:99999/api/v1/query", "test", "", "", false)
+	_, err := promcheck.QueryPrometheus("https://localhost:99999/api/v1/query", "test", "", "", false)
 	if err == nil {
 		t.Error("Expected connection error")
 	}
@@ -489,7 +491,7 @@ func TestQueryPrometheusNetworkErrors(t *testing.T) {
 
 	// Replace http with https to force TLS error on plain HTTP server
 	httpsURL := strings.Replace(server.URL, "http://", "https://", 1)
-	_, err = QueryPrometheus(httpsURL+"/api/v1/query", "test", "", "", false)
+	_, err = promcheck.QueryPrometheus(httpsURL+"/api/v1/query", "test", "", "", false)
 	if err == nil {
 		t.Error("Expected TLS error")
 	}
@@ -548,10 +550,9 @@ func BenchmarkQueryPrometheus(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_, err := QueryPrometheus(prometheusURL, "test_query", "", "", false)
+		_, err := promcheck.QueryPrometheus(prometheusURL, "test_query", "", "", false)
 		if err != nil {
 			b.Fatalf("Unexpected error: %v", err)
 		}
 	}
 }
-

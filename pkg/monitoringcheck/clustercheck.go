@@ -7,23 +7,19 @@ package monitoringcheck
 import (
 	"bytes"
 	"context"
-	"crypto/tls"
 	"encoding/json"
 	"fmt"
-	"io/ioutil"
-	"net/http"
-	"net/url"
+	"github.com/eumel8/clustercheck/pkg/promcheck"
+	"github.com/mattn/go-runewidth"
 	"os"
 	"os/exec"
 	"path/filepath"
-	"time"
 	"strings"
-	"github.com/mattn/go-runewidth"
 
 	helmv2 "github.com/fluxcd/helm-controller/api/v2"
 	kustomizev1 "github.com/fluxcd/kustomize-controller/api/v1"
-	"k8s.io/apimachinery/pkg/runtime"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/tools/clientcmd"
@@ -71,12 +67,6 @@ type PrometheusResponse struct {
 	} `json:"data"`
 }
 
-// Prometheus query struct
-type PrometheusQueries struct {
-	Description string `json:"description"`
-	Query       string `json:"query"`
-}
-
 // GetCurrentContext returns the current kubernetes context
 func GetCurrentContext() (string, error) {
 	kubeconfigPath := filepath.Join(os.Getenv("HOME"), ".kube", "config")
@@ -87,87 +77,6 @@ func GetCurrentContext() (string, error) {
 	}
 
 	return config.CurrentContext, nil
-}
-
-// QueryPrometheus queries Prometheus with the given parameters
-func QueryPrometheus(prometheus string, query string, username string, password string, debug bool) (string, error) {
-	value := "0"
-	params := url.Values{}
-	params.Add("query", query)
-	url := fmt.Sprintf("%s/api/v1/query?%s", prometheus, params.Encode())
-
-	if debug {
-		fmt.Printf("\n[DEBUG] Prometheus API Request:\n")
-		fmt.Printf("  URL: %s\n", url)
-		fmt.Printf("  Query: %s\n", query)
-		if username != "" {
-			fmt.Printf("  Auth: Basic (username: %s)\n", username)
-		}
-	}
-
-	req, err := http.NewRequest("GET", url, nil)
-	if err != nil {
-		return value, err
-	}
-	req.SetBasicAuth(username, password)
-
-	// skip TLS verification
-	insecureClient := &http.Client{
-		Timeout: time.Second * 10,
-		Transport: &http.Transport{
-			Proxy: http.ProxyFromEnvironment,
-			TLSClientConfig: &tls.Config{
-				InsecureSkipVerify: true,
-			},
-		},
-	}
-	resp, err := insecureClient.Do(req)
-	if err != nil {
-		if debug {
-			fmt.Printf("[DEBUG] Prometheus API Error: %v\n\n", err)
-		}
-		return value, err
-	}
-	defer resp.Body.Close()
-
-	if debug {
-		fmt.Printf("  Status Code: %d\n", resp.StatusCode)
-	}
-
-	body, err := ioutil.ReadAll(resp.Body)
-	if err != nil {
-		return value, err
-	}
-
-	if debug {
-		fmt.Printf("[DEBUG] Prometheus API Response:\n")
-		fmt.Printf("  Body: %s\n\n", string(body))
-	}
-
-	// Define a structure matching the Prometheus response
-	var result struct {
-		Status string `json:"status"`
-		Data   struct {
-			ResultType string `json:"resultType"`
-			Result     []struct {
-				Metric map[string]string `json:"metric"`
-				Value  [2]interface{}    `json:"value"`
-			} `json:"result"`
-		} `json:"data"`
-	}
-
-	// Parse JSON response
-	err = json.Unmarshal(body, &result)
-	if err != nil {
-		return value, err
-	}
-
-	// Extract the value (second element in the Value array)
-	if len(result.Data.Result) > 0 {
-		value = result.Data.Result[0].Value[1].(string)
-	}
-
-	return value, nil
 }
 
 // getKubeConfig returns the path to the kubeconfig file
@@ -398,7 +307,6 @@ func PrintBox(text string) {
 
 }
 
-
 // GateCheck performs all health checks and computes an overall health score
 func GateCheck(namespace string, bitwarden bool, fqdn string, debug bool) (*GateCheckResult, error) {
 	result := &GateCheckResult{
@@ -410,7 +318,7 @@ func GateCheck(namespace string, bitwarden bool, fqdn string, debug bool) (*Gate
 	if err != nil {
 		currentContext = "unknown"
 	}
-        title := fmt.Sprintf("CLUSTER GATE CHECK - %s", currentContext)
+	title := fmt.Sprintf("CLUSTER GATE CHECK - %s", currentContext)
 
 	PrintBox(title)
 
@@ -592,28 +500,12 @@ func runPrometheusChecks(bitwarden bool, fqdn string, debug bool) ([]CheckResult
 		cluster = os.Getenv("CLUSTER")
 	}
 
-	queries := []PrometheusQueries{
-		{
-			Description: "API Server",
-			Query:       `avg(up{job="kube-apiserver",cluster="` + cluster + `"})`,
-		},
-		{
-			Description: "Kubelet",
-			Query:       `clamp((count(up{job="kubelet", cluster="` + cluster + `"}) > 3),1,1)`,
-		},
-		{
-			Description: "Node Status",
-			Query:       `min(kube_node_status_condition{condition="Ready",status="true",cluster="` + cluster + `"})`,
-		},
-		{
-			Description: "System Pods",
-			Query:       `clamp(sum(kube_pod_status_phase{namespace=~".*-system", phase!~"Running|Succeeded",cluster="` + cluster + `"} == 0),1,1)`,
-		},
-	}
+	queries := promcheck.Select(promcheck.DefaultQueries(cluster, cluster),
+		promcheck.APIServer, promcheck.Kubelet, promcheck.Node, promcheck.SystemPods)
 
 	allPassed := true
 	for _, query := range queries {
-		result, err := QueryPrometheus(prometheus, query.Query, username, password, debug)
+		result, err := promcheck.QueryPrometheus(prometheus, query.Query, username, password, debug)
 		if err != nil {
 			results = append(results, CheckResult{
 				Name:    query.Description,
@@ -695,65 +587,16 @@ func Run(bitwarden bool, fqdn string, debug bool) {
 		cluster = os.Getenv("CLUSTER")
 	}
 
-	queries := []PrometheusQueries{
-		{
-			Description: "APISERVER",
-			Query:       `avg(up{job="kube-apiserver",cluster="` + cluster + `"})`,
-		},
-		{
-			Description: "CLUSTER",
-			Query:       `capi_cluster_status_phase{phase="Provisioned", tenantcluster="` + shortCluster + `"} == 1`,
-		},
-                {
-                        Description: "FLUENTBIT_OK",
-                        Query: `count(max(fluentbit_output_errors_total{cluster="` + cluster + `"}) + 1)`,
-                },
-                {
-                        Description: "FLUENTD_OK",
-                        Query: `count(max(fluentd_output_status_num_errors{cluster="` + cluster + `"}) + 1)`,
-                },
-		{
-			Description: "GOLDPINGER",
-			Query:       `avg(goldpinger_cluster_health_total{cluster="` + cluster + `"})`,
-		},
-		{
-			Description: "KUBEDNS",
-			Query:       `avg(up{job="kube-dns", cluster="` + cluster + `"})`,
-		},
-		{
-			Description: "KUBELET",
-			Query:       `clamp((count(up{job="kubelet", cluster="` + cluster + `"}) > 3),1,1)`,
-		},
-		{
-			Description: "NETWORKOPERATOR",
-			Query:       `clamp(avg(nwop_netlink_routes_fib{protocol="bgp",vrf="main",cluster="` + cluster + `"}),1,1) or clamp(avg(nwop_vsr_routes_fib{protocol="bgp",vrf="main",cluster="` + cluster + `"}),1,1)`,
-		},
-		{
-			Description: "NODE",
-			Query:       `min(kube_node_status_condition{condition="Ready",status="true",cluster="` + cluster + `"})`,
-		},
-		{
-			Description: "STORAGECHECK",
-			Query:       `clamp((increase(storage_check_success_total{cluster="` + cluster + `"}[1h]) >= 1),1,1)`,
-		},
-		{
-			Description: "PROMETHEUSAGENT",
-			Query:       `avg(up{job="prometheus-agent",cluster="` + cluster + `"})`,
-		},
-		{
-			Description: "SYSTEMPODS",
-			Query:       `clamp(sum(kube_pod_status_phase{namespace=~".*-system", phase!~"Running|Succeeded",cluster="` + cluster + `"} == 0),1,1)`,
-		},
-	}
+	queries := promcheck.DefaultQueries(cluster, shortCluster)
 
 	fmt.Printf("\033[36mclustercheck \033[0m on %s\n", cluster)
 	for _, query := range queries {
-		result, err := QueryPrometheus(prometheus, query.Query, username, password, debug)
+		result, err := promcheck.QueryPrometheus(prometheus, query.Query, username, password, debug)
 		if err != nil {
 			fmt.Println("Error query :", query.Description, err)
 		} else {
 			if result == "1" {
-			        fmt.Printf("%s \033[32m🟢 OK (1)\033[0m \n", query.Description)
+				fmt.Printf("%s \033[32m🟢 OK (1)\033[0m \n", query.Description)
 			} else {
 				fmt.Printf("%s \033[31m🔴 FAIL (0)\033[0m \n", query.Description)
 			}
